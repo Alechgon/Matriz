@@ -18,6 +18,24 @@ const SI_NO = ['SI', 'NO'];
 const BUE_MAL = ['BUENO', 'MALO'];
 const CAMPANA = ['SI', 'NO', 'Extractor (SI)', 'Extractor (NO)'];
 
+/* La plantilla guarda campana y extractor en UNA sola celda, con la lista
+   SI / NO / Extractor (SI) / Extractor (NO). En la app se preguntan por
+   separado y aquí se combinan respetando ese mismo vocabulario. */
+function pairTexto(v) {
+  if (!v) return '';
+  const c = v.campana, e = v.extractor;
+  if (!c && !e) return '';
+  if (!e) return c;
+  if (!c) return 'Extractor (' + e + ')';
+  return c + ' / Extractor (' + e + ')';
+}
+function respondida(q) {
+  const v = S.resp[q.n];
+  if (q.tipo === 'pair') return !!(v && q.pares.every(p => v[p.key]));
+  if (q.tipo === 'multi') return Array.isArray(v) && v.length > 0;
+  return v !== undefined && String(v).trim() !== '';
+}
+
 /* ============================================================
    DEFINICIÓN DE LAS 51 PREGUNTAS
    n     = número de pregunta (= número de columna en el Sheet)
@@ -55,9 +73,21 @@ const Q = [
   { n: 15, col: 'Existencia de cocina', g: 'Evaluación Cocina', t: '¿Existe cocina en el establecimiento?', tipo: 'single', ops: SI_NO, hint: 'Si marcas NO, se omiten todas las preguntas de cocina.' },
   { n: 16, col: 'Dimensiones de la cocina (m2)', g: 'Evaluación Cocina', t: '¿Cuánto mide la cocina en m²?', tipo: 'text', ph: 'Ej: 24 m2  ·  o 6 x 4', if: cocina },
 
-  { n: 17, col: 'Campana  Cubre Fogones', g: 'Campanas Cocina', t: '¿Los fogones tienen campana que los cubra?', tipo: 'single', ops: CAMPANA, if: cocina, foto: { req: false, multi: true, key: 'p17', hint: 'Foto de evidencia de los fogones (opcional pero recomendada).' } },
-  { n: 18, col: 'Campana  Cubre Hornos', g: 'Campanas Cocina', t: '¿Los hornos tienen campana que los cubra?', tipo: 'single', ops: CAMPANA, if: cocina, foto: { req: false, multi: true, key: 'p18', hint: 'Foto de evidencia de los hornos (opcional pero recomendada).' } },
-  { n: 19, col: 'Campana  Cubre Baño María', g: 'Campanas Cocina', t: '¿El baño maría tiene campana que lo cubra?', tipo: 'single', ops: CAMPANA, if: cocina, foto: { req: false, multi: true, key: 'p19', hint: 'Foto de evidencia del baño maría (opcional pero recomendada).' } },
+  {
+    n: 17, col: 'Campana  Cubre Fogones', g: 'Campanas Cocina', t: 'Fogones: ¿tienen campana y/o extractor?', tipo: 'pair', if: cocina,
+    pares: [{ key: 'campana', ic: '🏠', label: '¿Hay campana que cubra los fogones?' }, { key: 'extractor', ic: '🌀', label: '¿Hay extractor?' }],
+    foto: { req: false, multi: true, key: 'p17', hint: 'Foto de evidencia de los fogones (opcional pero recomendada).' }
+  },
+  {
+    n: 18, col: 'Campana  Cubre Hornos', g: 'Campanas Cocina', t: 'Hornos: ¿tienen campana y/o extractor?', tipo: 'pair', if: cocina,
+    pares: [{ key: 'campana', ic: '🏠', label: '¿Hay campana que cubra los hornos?' }, { key: 'extractor', ic: '🌀', label: '¿Hay extractor?' }],
+    foto: { req: false, multi: true, key: 'p18', hint: 'Foto de evidencia de los hornos (opcional pero recomendada).' }
+  },
+  {
+    n: 19, col: 'Campana  Cubre Baño María', g: 'Campanas Cocina', t: 'Baño maría: ¿tiene campana y/o extractor?', tipo: 'pair', if: cocina,
+    pares: [{ key: 'campana', ic: '🏠', label: '¿Hay campana que cubra el baño maría?' }, { key: 'extractor', ic: '🌀', label: '¿Hay extractor?' }],
+    foto: { req: false, multi: true, key: 'p19', hint: 'Foto de evidencia del baño maría (opcional pero recomendada).' }
+  },
 
   {
     n: 20, col: 'Iluminación Adecuada', g: 'Iluminación Cocina', t: '¿La cocina tiene iluminación adecuada para trabajar?', tipo: 'single', ops: SI_NO, if: cocina,
@@ -400,6 +430,22 @@ function renderQ() {
 function ansHTML(q, val) {
   if (q.tipo === 'text') return `<input type="text" id="fTxt" placeholder="${esc(q.ph || '')}" value="${esc(val || '')}">`;
   if (q.tipo === 'num') return `<input type="number" id="fNum" inputmode="numeric" placeholder="${esc(q.ph || '')}" value="${esc(val || '')}">`;
+  if (q.tipo === 'pair') {
+    const v = val || {};
+    const cajas = q.pares.map(p => {
+      const sel = v[p.key];
+      const opts = SI_NO.map(o => {
+        const on = sel === o, tone = on ? (o === 'SI' ? ' good' : ' bad') : '';
+        return `<button class="opt${on ? ' sel' : ''}${tone}" data-p="${esc(p.key)}" data-o="${esc(o)}"><span class="mark">${on ? '✓' : ''}</span><span>${esc(o)}</span></button>`;
+      }).join('');
+      return `<div class="pairbox${sel ? ' done' : ''}">
+        <div class="pl"><span class="pic">${p.ic}</span><span>${esc(p.label)}</span></div>
+        <div class="opts">${opts}</div></div>`;
+    }).join('');
+    const txt = pairTexto(v);
+    return `<div class="pairq">${cajas}</div>
+      <p class="pairnote">Responde las dos. En la planilla se guarda como <b>${esc(txt || '—')}</b>.</p>`;
+  }
   const multi = q.tipo === 'multi';
   const sel = multi ? (Array.isArray(val) ? val : []) : [val];
   const two = q.ops.length === 2 && q.ops.every(o => o.length <= 6);
@@ -413,6 +459,17 @@ function bindAns(q) {
   if (q.tipo === 'text' || q.tipo === 'num') {
     const i = $('#fTxt') || $('#fNum');
     i.oninput = () => { S.resp[q.n] = i.value.trim(); refreshNext(); saveDraft(); };
+    return;
+  }
+  if (q.tipo === 'pair') {
+    $$('#ansZone .opt[data-p]').forEach(b => b.onclick = () => {
+      const v = Object.assign({}, S.resp[q.n]);
+      v[b.dataset.p] = b.dataset.o;
+      S.resp[q.n] = v;
+      $('#ansZone').innerHTML = ansHTML(q, v); bindAns(q);
+      $('#fotoZone').innerHTML = fotoAplica(q) ? fotoHTML(q) : ''; if (fotoAplica(q)) bindFoto(q);
+      refreshNext(); saveDraft();
+    });
     return;
   }
   $$('#ansZone .opt').forEach(b => b.onclick = () => {
@@ -462,7 +519,7 @@ function fotoAplica(q) {
   if (!q.foto) return false;
   if (q.foto.when) return S.resp[q.n] === q.foto.when;
   if (q.foto.whenSub) return S.subs[q.sub.key] === q.foto.whenSub;
-  return !!S.resp[q.n];
+  return respondida(q);
 }
 function fotoReq(q) {
   if (!fotoAplica(q)) return false;
@@ -519,10 +576,7 @@ function paintUpBar(key) {
 
 function refreshNext() {
   const list = visibles(); const q = list[S.idx]; if (!q) return;
-  let ok = true;
-  const v = S.resp[q.n];
-  if (q.tipo === 'multi') ok = Array.isArray(v) && v.length > 0;
-  else ok = v !== undefined && String(v).trim() !== '';
+  let ok = respondida(q);
   if (ok && q.sub && subAplica(q)) {
     const sv = S.subs[q.sub.key];
     if (q.sub.req !== false) ok = sv !== undefined && String(sv).trim() !== '';
@@ -634,6 +688,7 @@ async function postJSON(payload, timeoutMs = 90000) {
    ============================================================ */
 function valorTexto(q) {
   const v = S.resp[q.n];
+  if (q.tipo === 'pair') return pairTexto(v) || '—';
   if (Array.isArray(v)) return v.join(' · ');
   return v === undefined || v === '' ? '—' : String(v);
 }
@@ -687,6 +742,7 @@ async function enviar() {
     if (q.n === 4) return S.est[COL.COM];
     if (q.if && !q.if()) return 'NO APLICA';
     const v = S.resp[q.n];
+    if (q.tipo === 'pair') return pairTexto(v);
     if (Array.isArray(v)) return v.join(' / ');
     return v === undefined ? '' : String(v);
   });
