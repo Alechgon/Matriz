@@ -9,7 +9,8 @@ const EXEC = 'https://script.google.com/macros/s/AKfycbykNWqnSYvD-u20PBBxEpt6vrN
 const COL = { RBD: 0, NOM: 1, DIR: 2, COM: 3, SUP: 4, INST: 5, TEC: 6 };
 const LS_DRAFT = 'soser_ficha_draft';
 const LS_NAME = 'soser_ficha_evaluador';
-const FOTO_MAX_LADO = 1920;
+const FOTO_MAX_LADO = 2560;   // lado mayor tras el redimensionado
+const FOTO_CALIDAD = 0.92;    // calidad JPEG (0-1)
 
 const LOGO_SVG = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F49A0F"/><stop offset="0.5" stop-color="#E8A30C"/><stop offset="1" stop-color="#7DB61C"/></linearGradient></defs><path d="M50 12 C30 12 20 30 28 48 C34 62 50 64 50 64 C50 64 66 62 72 48 C80 30 70 12 50 12 Z" fill="url(#sg)"/><path d="M50 20 C44 30 56 40 50 52 C46 44 54 34 50 20 Z" fill="#2E7D32" opacity="0.85"/></svg>`;
 
@@ -29,6 +30,26 @@ function pairTexto(v) {
   if (!c) return 'Extractor (' + e + ')';
   return c + ' / Extractor (' + e + ')';
 }
+/* ¿La pregunta tiene marcada la opción "Otro" y por lo tanto pide detalle? */
+function otroAplica(q) {
+  if (!q.otro) return false;
+  const v = S.resp[q.n];
+  if (Array.isArray(v)) return v.indexOf('Otro') !== -1;
+  return v === 'Otro';
+}
+function otroHTML(q) {
+  const v = S.otros[q.otro.key] || '';
+  return `<div class="otrobox">
+    <div class="ol"><span class="oic">✎</span><span>${esc(q.otro.label)}</span></div>
+    <input type="text" id="oTxt" placeholder="${esc(q.otro.ph || 'Escriba aquí')}" value="${esc(v)}">
+    <p class="onote">Se guarda en su propia columna del Sheet, sin tocar la respuesta original.</p>
+  </div>`;
+}
+function bindOtro(q) {
+  const i = $('#oTxt'); if (!i) return;
+  i.oninput = () => { S.otros[q.otro.key] = i.value.trim(); refreshNext(); saveDraft(); };
+}
+
 function respondida(q) {
   const v = S.resp[q.n];
   if (q.tipo === 'pair') return !!(v && q.pares.every(p => v[p.key]));
@@ -56,8 +77,9 @@ const Q = [
 
   { n: 5, col: 'Programa', g: 'Registro de antecedentes', t: '¿Qué programa se atiende en este establecimiento?', tipo: 'single', ops: ['PAE', 'PAP'] },
   { n: 6, col: 'Organismo asociado', g: 'Registro de antecedentes', t: '¿A qué organismo pertenece?', tipo: 'single', ops: ['JUNAEB', 'JUNJI', 'INTEGRA'] },
-  { n: 7, col: 'Dependencia', g: 'Registro de antecedentes', t: '¿De quién depende el establecimiento?', tipo: 'single', ops: ['Municipal', 'Servicio Local de Educación Pública (SLEP)', 'Particular subvencionado', 'Administración delegada', 'JUNJI (Jardín infantil)', 'Fundación Integra (Jardín infantil)', 'Otro'] },
-  { n: 8, col: 'Nombre Sostenedor (Municipalidad , Slep etc.)', g: 'Registro de antecedentes', t: '¿Cuál es el nombre del sostenedor?', tipo: 'text', ph: 'Ej: Municipalidad de Santiago' },
+  { n: 7, col: 'Dependencia', g: 'Registro de antecedentes', t: '¿De quién depende el establecimiento?', tipo: 'single', ops: ['Municipal', 'Servicio Local de Educación Pública (SLEP)', 'Particular subvencionado', 'Administración delegada', 'JUNJI (Jardín infantil)', 'Fundación Integra (Jardín infantil)', 'Otro'],
+    otro: { key: 'o7', label: '¿De quién depende? Especifica', ph: 'Escriba aquí' } },
+  { n: 8, col: 'Nombre Sostenedor (Municipalidad , Slep etc.)', g: 'Registro de antecedentes', t: '¿Cuál es el nombre del sostenedor?', tipo: 'text', ph: 'Escriba aquí' },
   { n: 9, col: 'Número de raciones diarias', g: 'Registro de antecedentes', t: '¿Cuántas raciones diarias certificadas tiene?', tipo: 'num', ph: 'Ej: 320' },
   {
     n: 10, col: 'Cuenta con Resolución Sanitaria de Cocina', g: 'Registro de antecedentes',
@@ -67,8 +89,10 @@ const Q = [
   { n: 11, col: 'Número de Resolución Sanitaria de Cocina', g: 'Registro de antecedentes', t: '¿Cuál es el número de la Resolución Sanitaria de cocina?', tipo: 'text', ph: 'Ej: 12345-B / 2019', if: q => ans(10) === 'SI' },
 
   { n: 12, col: 'Agua potable', g: 'Servicios Básicos Establecimiento', t: '¿El establecimiento cuenta con agua potable?', tipo: 'single', ops: SI_NO },
-  { n: 13, col: 'Origen del agua', g: 'Servicios Básicos Establecimiento', t: '¿De dónde proviene el agua?', tipo: 'single', ops: ['Red Pública', 'APR', 'Pozo / Noria', 'Aljibe', 'Otro'] },
-  { n: 14, col: 'Alcantarillado', g: 'Servicios Básicos Establecimiento', t: '¿Cómo se eliminan las aguas servidas?', tipo: 'multi', ops: ['Red Pública', 'Pozo Negro', 'Fosa Séptica', 'Otro'], hint: 'Puedes marcar más de una y desmarcar tocando de nuevo.' },
+  { n: 13, col: 'Origen del agua', g: 'Servicios Básicos Establecimiento', t: '¿De dónde proviene el agua?', tipo: 'single', ops: ['Red Pública', 'APR', 'Pozo / Noria', 'Aljibe', 'Otro'],
+    otro: { key: 'o13', label: '¿Cuál es el origen del agua? Especifica', ph: 'Escriba aquí' } },
+  { n: 14, col: 'Alcantarillado', g: 'Servicios Básicos Establecimiento', t: '¿Cómo se eliminan las aguas servidas?', tipo: 'multi', ops: ['Red Pública', 'Pozo Negro', 'Fosa Séptica', 'Otro'], hint: 'Puedes marcar más de una y desmarcar tocando de nuevo.',
+    otro: { key: 'o14', label: '¿Qué otro sistema? Especifica', ph: 'Escriba aquí' } },
 
   { n: 15, col: 'Existencia de cocina', g: 'Evaluación Cocina', t: '¿Existe cocina en el establecimiento?', tipo: 'single', ops: SI_NO, hint: 'Si marcas NO, se omiten todas las preguntas de cocina.' },
   { n: 16, col: 'Dimensiones de la cocina (m2)', g: 'Evaluación Cocina', t: '¿Cuánto mide la cocina en m²?', tipo: 'text', ph: 'Ej: 24 m2  ·  o 6 x 4', if: cocina },
@@ -116,7 +140,10 @@ const Q = [
     foto: { when: 'NO', req: true, multi: true, key: 'p27', hint: 'Adjunta foto que evidencie el material de la pared.' },
     sub: { key: 'p27d', label: 'Describe de qué material es la pared', tipo: 'text', when: 'NO', ph: 'Ej: muro de albañilería pintado, sin cerámico hasta 1,8 m', req: true }
   },
-  { n: 28, col: 'Estado', colAlias: 'Paredes · Estado', g: 'Paredes', t: '¿En qué estado están las paredes de la cocina?', tipo: 'single', ops: BUE_MAL, if: cocina },
+  {
+    n: 28, col: 'Estado', colAlias: 'Paredes · Estado', g: 'Paredes', t: '¿En qué estado están las paredes de la cocina?', tipo: 'single', ops: BUE_MAL, if: cocina,
+    foto: { req: false, multi: true, key: 'p28', hint: 'Adjunta foto que evidencie el estado de las paredes.' }
+  },
   {
     n: 29, col: 'Programa de Protección de Plagas', g: 'Paredes', t: '¿La cocina tiene programa de control de plagas?', tipo: 'single', ops: SI_NO, if: cocina,
     foto: { req: false, multi: true, key: 'p29', hint: 'Si está a la vista, adjunta foto del calendario o certificado de la última visita.' }
@@ -129,8 +156,14 @@ const Q = [
     n: 33, col: 'Lámparas con Protección', g: 'Iluminación Bodega', t: '¿Las lámparas de la bodega tienen protección?', tipo: 'single', ops: SI_NO, if: bodega,
     foto: { when: 'NO', req: false, multi: true, key: 'p33', hint: 'Puedes adjuntar fotos de las lámparas sin protección.' }
   },
-  { n: 34, col: 'Cerámico', colAlias: 'Bodega · Piso Cerámico', g: 'Piso Bodega', t: '¿El piso de la bodega es cerámico?', tipo: 'single', ops: SI_NO, if: bodega },
-  { n: 35, col: 'Estado Piso Bodega', g: 'Piso Bodega', t: '¿En qué estado está el piso de la bodega?', tipo: 'single', ops: BUE_MAL, if: bodega },
+  {
+    n: 34, col: 'Cerámico', colAlias: 'Bodega · Piso Cerámico', g: 'Piso Bodega', t: '¿El piso de la bodega es cerámico?', tipo: 'single', ops: SI_NO, if: bodega,
+    foto: { req: false, multi: true, key: 'p34', hint: 'Adjunta foto que evidencie el material del piso.' }
+  },
+  {
+    n: 35, col: 'Estado Piso Bodega', g: 'Piso Bodega', t: '¿En qué estado está el piso de la bodega?', tipo: 'single', ops: BUE_MAL, if: bodega,
+    foto: { req: false, multi: true, key: 'p35', hint: 'Adjunta foto que evidencie el estado del piso.' }
+  },
 
   { n: 36, col: 'Existencia de Baño', g: 'Baño para manipuladoras', t: '¿Existe baño para las manipuladoras?', tipo: 'single', ops: SI_NO, hint: 'Si marcas NO, se omiten las preguntas del baño.' },
   { n: 37, col: 'Uso exclusivo Baño', g: 'Baño para manipuladoras', t: '¿El baño es de uso exclusivo de las manipuladoras?', tipo: 'single', ops: SI_NO, if: bano },
@@ -141,7 +174,9 @@ const Q = [
 
   { n: 42, col: 'Existencia Sala de Vestuario', g: 'Sala de Vestuario', t: '¿Existe sala de vestuario?', tipo: 'single', ops: SI_NO, hint: 'Si marcas NO, se omiten las preguntas de vestuario.' },
   { n: 43, col: 'Uso exclusivo Sala de Vestuario', g: 'Sala de Vestuario', t: '¿La sala de vestuario es de uso exclusivo?', tipo: 'single', ops: SI_NO, if: vest },
-  { n: 44, col: 'Espacio Locker', g: 'Sala de Vestuario', t: '¿Hay lockers o casilleros para el personal?', tipo: 'single', ops: SI_NO, if: vest },
+  /* El locker NO depende de que exista sala de vestuario: puede haber
+     casilleros en un pasillo o en la cocina aunque no haya sala. */
+  { n: 44, col: 'Espacio Locker', g: 'Sala de Vestuario', t: '¿Hay lockers o casilleros para el personal?', tipo: 'single', ops: SI_NO },
 
   { n: 45, col: 'Caseta de Gas', g: 'Patio de Servicio', t: '¿Existe caseta de gas?', tipo: 'single', ops: SI_NO, hint: 'Si marcas NO, se omiten estado y certificación SEC.' },
   {
@@ -153,36 +188,58 @@ const Q = [
     foto: { when: 'SI', req: true, multi: true, key: 'p47', hint: 'Saca foto al sello o certificado SEC.' }
   },
   { n: 48, col: 'Lugar para Disposición Basura', g: 'Patio de Servicio', t: '¿Hay un lugar definido para la disposición de basura?', tipo: 'single', ops: SI_NO },
-  { n: 49, col: 'Superficie piso patio servicio', g: 'Patio de Servicio', t: '¿De qué material es el piso del patio de servicio?', tipo: 'multi', ops: ['Pavimento', 'Cerámica', 'Tierra', 'Otro'], hint: 'Puedes marcar más de una si el patio tiene distintas superficies.' },
+  { n: 49, col: 'Superficie piso patio servicio', g: 'Patio de Servicio', t: '¿De qué material es el piso del patio de servicio?', tipo: 'multi', ops: ['Pavimento', 'Cerámica', 'Tierra', 'Otro'], hint: 'Puedes marcar más de una si el patio tiene distintas superficies.',
+    otro: { key: 'o49', label: '¿Qué otra superficie? Especifica', ph: 'Escriba aquí' } },
 
-  { n: 50, col: 'Fuentes de contaminación cercanas', g: 'Entorno', t: '¿Hay fuentes de contaminación cerca del establecimiento?', tipo: 'multi', ops: ['Ninguna', 'Basural o microbasural', 'Canal o acequia', 'Aguas servidas', 'Criadero de animales', 'Camino de tierra / polvo', 'Industria', 'Otro'], hint: 'Marca todas las que apliquen.' },
+  { n: 50, col: 'Fuentes de contaminación cercanas', g: 'Entorno', t: '¿Hay fuentes de contaminación cerca del establecimiento?', tipo: 'multi', ops: ['Ninguna', 'Basural o microbasural', 'Canal o acequia', 'Aguas servidas', 'Criadero de animales', 'Camino de tierra / polvo', 'Industria', 'Otro'], hint: 'Marca todas las que apliquen.',
+    otro: { key: 'o50', label: '¿Qué otra fuente? Especifica', ph: 'Escriba aquí' } },
   { n: 51, col: 'Programa Protección Plagas del establecimiento y su entorno', g: 'Entorno', t: '¿El establecimiento y su entorno tienen programa de control de plagas?', tipo: 'single', ops: SI_NO }
 ];
 
 /* Columnas adicionales (van al final del Sheet, en azul, indicando a qué pregunta pertenecen) */
+/* Columnas adicionales. Van DESPUÉS de las 51 de la plantilla, cada una con su
+   propio título rotulado "→ P## · …" para saber a qué pregunta pertenece.
+   Ninguna comparte celda con otra: si mañana se agrega una más, se suma al
+   final y las anteriores no se mueven de lugar. */
 const EXTRA_COLS = [
+  /* Trazabilidad */
   { key: '_id', h: 'ID Ficha' },
   { key: '_evaluador', h: 'Evaluador' },
   { key: '_fecha', h: 'Fecha' },
   { key: '_ts', h: 'Timestamp' },
   { key: '_gps', h: 'GPS' },
   { key: '_gpsacc', h: 'Precisión GPS (m)' },
-  { key: 'p10', h: '→ P10 · Foto Resolución Sanitaria de Cocina' },
-  { key: 'p17', h: '→ P17 · Foto Campana Fogones' },
-  { key: 'p18', h: '→ P18 · Foto Campana Hornos' },
-  { key: 'p19', h: '→ P19 · Foto Campana Baño María' },
+
+  /* Detalle escrito de la opción "Otro" */
+  { key: 'o7',  h: '→ P7 · Dependencia · detalle "Otro"' },
+  { key: 'o13', h: '→ P13 · Origen del agua · detalle "Otro"' },
+  { key: 'o14', h: '→ P14 · Alcantarillado · detalle "Otro"' },
+  { key: 'o49', h: '→ P49 · Superficie patio · detalle "Otro"' },
+  { key: 'o50', h: '→ P50 · Fuentes de contaminación · detalle "Otro"' },
+
+  /* Datos que no existen en la plantilla original */
   { key: 'p20q', h: '→ P20 · ¿Focos quemados en la cocina?' },
+  { key: 'p27d', h: '→ P27 · Descripción material paredes' },
+
+  /* Fotos (links de Drive) */
+  { key: 'p10', h: '→ P10 · Foto Resolución Sanitaria de Cocina' },
+  { key: 'p17', h: '→ P17 · Fotos Campana / Extractor Fogones' },
+  { key: 'p18', h: '→ P18 · Fotos Campana / Extractor Hornos' },
+  { key: 'p19', h: '→ P19 · Fotos Campana / Extractor Baño María' },
   { key: 'p20f', h: '→ P20 · Fotos focos quemados' },
   { key: 'p21', h: '→ P21 · Fotos lámparas sin protección' },
   { key: 'p25', h: '→ P25 · Fotos piso cocina en mal estado' },
   { key: 'p26', h: '→ P26 · Foto lavamanos cocina' },
   { key: 'p27', h: '→ P27 · Fotos paredes cocina' },
-  { key: 'p27d', h: '→ P27 · Descripción material paredes' },
+  { key: 'p28', h: '→ P28 · Fotos estado paredes cocina' },
   { key: 'p29', h: '→ P29 · Foto calendario control de plagas' },
   { key: 'p33', h: '→ P33 · Fotos lámparas bodega sin protección' },
+  { key: 'p34', h: '→ P34 · Fotos material piso bodega' },
+  { key: 'p35', h: '→ P35 · Fotos estado piso bodega' },
   { key: 'p46', h: '→ P46 · Foto caseta de gas en mal estado' },
   { key: 'p47', h: '→ P47 · Foto certificación SEC' }
 ];
+
 
 /* Condiciones de salto */
 function ans(n) { return S.resp[n]; }
@@ -196,7 +253,7 @@ function gas() { return ans(45) !== 'NO'; }
    ESTADO
    ============================================================ */
 const S = {
-  evaluador: '', est: null, resp: {}, subs: {}, fotos: {},
+  evaluador: '', est: null, resp: {}, subs: {}, otros: {}, fotos: {},
   idx: 0, fichaId: null, startedAt: null, gps: null, gpsWatch: null
 };
 
@@ -216,7 +273,7 @@ function stamp() { const d = new Date(); const p = n => String(n).padStart(2, '0
 function saveDraft() {
   try {
     localStorage.setItem(LS_DRAFT, JSON.stringify({
-      evaluador: S.evaluador, est: S.est, resp: S.resp, subs: S.subs, idx: S.idx,
+      evaluador: S.evaluador, est: S.est, resp: S.resp, subs: S.subs, otros: S.otros, idx: S.idx,
       fichaId: S.fichaId, startedAt: S.startedAt,
       fotos: Object.fromEntries(Object.entries(S.fotos).map(([k, arr]) =>
         [k, arr.filter(m => m.upState === 'done').map(m => ({ name: m.driveName, url: m.driveUrl, upState: 'done', type: 'photo' }))]))
@@ -276,13 +333,13 @@ function renderHome() {
 }
 
 function startNueva() {
-  S.est = null; S.resp = {}; S.subs = {}; S.fotos = {}; S.idx = 0;
+  S.est = null; S.resp = {}; S.subs = {}; S.otros = {}; S.fotos = {}; S.idx = 0;
   S.fichaId = null; S.startedAt = new Date().toISOString();
   S.evaluador = localStorage.getItem(LS_NAME) || '';
   renderEvaluador();
 }
 function resumeDraft(d) {
-  S.evaluador = d.evaluador || ''; S.est = d.est; S.resp = d.resp || {}; S.subs = d.subs || {};
+  S.evaluador = d.evaluador || ''; S.est = d.est; S.resp = d.resp || {}; S.subs = d.subs || {}; S.otros = d.otros || {};
   S.fichaId = d.fichaId; S.startedAt = d.startedAt; S.idx = d.idx || 0;
   S.fotos = {};
   for (const [k, arr] of Object.entries(d.fotos || {})) S.fotos[k] = arr.map(m => ({ ...m, url: m.url }));
@@ -298,7 +355,7 @@ function renderEvaluador() {
     <div class="eyebrow"><b>Ficha</b> <span class="grp">· Identificación</span></div>
     <h2 class="q">¿Quién está realizando la evaluación?</h2>
     <div class="field-block"><label class="fld">Nombre completo</label>
-      <input type="text" id="evName" placeholder="Ej: Manuel Echeverría" autocomplete="name" value="${esc(S.evaluador)}"></div>
+      <input type="text" id="evName" placeholder="Escriba aquí" autocomplete="name" value="${esc(S.evaluador)}"></div>
     <p class="note">Tu nombre queda registrado en la ficha junto a la fecha y la ubicación.</p>
   </div></div></div>`;
   btnBack.onclick = renderHome;
@@ -412,12 +469,13 @@ function renderQ() {
       <h2 class="q">${esc(q.t)}</h2>
       <div id="ansZone">${ansHTML(q, val)}</div>
       ${q.hint ? `<p class="note">${esc(q.hint)}</p>` : ''}
+      <div id="otroZone">${otroAplica(q) ? otroHTML(q) : ''}</div>
       <div id="subZone">${subOn ? subHTML(q) : ''}</div>
       <div id="fotoZone">${fotoOn ? fotoHTML(q) : ''}</div>
     </div></div>
   </div>`;
 
-  bindAns(q); if (subOn) bindSub(q); if (fotoOn) bindFoto(q);
+  bindAns(q); if (otroAplica(q)) bindOtro(q); if (subOn) bindSub(q); if (fotoOn) bindFoto(q);
   showNav(true); $('#btnHome').classList.remove('hidden'); $('#btnHome').onclick = confirmSalir;
   btnBack.onclick = () => { S.idx--; saveDraft(); renderQ(); };
   const ultima = S.idx === list.length - 1;
@@ -484,7 +542,9 @@ function bindAns(q) {
        para que no queden links huérfanos en las columnas adicionales. */
     if (q.foto && (q.foto.when || q.foto.whenSub) && !fotoAplica(q)) S.fotos[q.foto.key] = [];
     if (q.sub && q.sub.when && !subAplica(q)) delete S.subs[q.sub.key];
+    if (q.otro && !otroAplica(q)) delete S.otros[q.otro.key];
     $('#ansZone').innerHTML = ansHTML(q, S.resp[q.n]); bindAns(q);
+    $('#otroZone').innerHTML = otroAplica(q) ? otroHTML(q) : ''; if (otroAplica(q)) bindOtro(q);
     $('#subZone').innerHTML = subAplica(q) ? subHTML(q) : ''; if (subAplica(q)) bindSub(q);
     $('#fotoZone').innerHTML = fotoAplica(q) ? fotoHTML(q) : ''; if (fotoAplica(q)) bindFoto(q);
     refreshNext(); saveDraft();
@@ -577,6 +637,10 @@ function paintUpBar(key) {
 function refreshNext() {
   const list = visibles(); const q = list[S.idx]; if (!q) return;
   let ok = respondida(q);
+  if (ok && otroAplica(q)) {
+    const ov = S.otros[q.otro.key];
+    ok = ov !== undefined && String(ov).trim() !== '';
+  }
   if (ok && q.sub && subAplica(q)) {
     const sv = S.subs[q.sub.key];
     if (q.sub.req !== false) ok = sv !== undefined && String(sv).trim() !== '';
@@ -615,7 +679,15 @@ async function openCamera(key) {
   $('.camclose', ov).onclick = close;
   stopCam();
   try {
-    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+    /* Se pide la mayor resolución que entregue el sensor. Si el teléfono no
+       puede con 4K, el navegador negocia hacia abajo solo (por eso "ideal"). */
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 3840 }, height: { ideal: 2160 },
+        resizeMode: 'none'
+      }, audio: false
+    });
     video.srcObject = camStream; await video.play().catch(() => { });
   } catch (err) {
     close();
@@ -624,10 +696,40 @@ async function openCamera(key) {
         : 'No se pudo abrir la cámara. Usa "Galería".';
     toast(msg, 3600); return;
   }
-  $('.shoot', ov).onclick = () => {
-    const c = document.createElement('canvas'); c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
-    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
-    c.toBlob(b => { if (b) addFoto(key, { blob: b, url: URL.createObjectURL(b) }); close(); }, 'image/jpeg', .82);
+  const shoot = $('.shoot', ov);
+  shoot.onclick = async () => {
+    shoot.style.opacity = .5; shoot.style.pointerEvents = 'none';
+    let blob = null;
+    /* 1) ImageCapture: usa la resolución de FOTO del sensor, no la del video.
+          Es lo que más se acerca a la app de cámara del teléfono. */
+    try {
+      if (window.ImageCapture && camStream) {
+        const track = camStream.getVideoTracks()[0];
+        const ic = new ImageCapture(track);
+        let opts = {};
+        try {
+          const caps = await ic.getPhotoCapabilities();
+          if (caps && caps.imageWidth && caps.imageWidth.max) {
+            opts.imageWidth = caps.imageWidth.max;
+            opts.imageHeight = caps.imageHeight.max;
+          }
+        } catch (e) { opts = {}; }
+        const b = await ic.takePhoto(opts);
+        if (b && b.size > 1000) blob = b;
+      }
+    } catch (e) { blob = null; }
+    /* 2) Respaldo: cuadro del video a resolución nativa */
+    if (!blob) {
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth || 1920; c.height = video.videoHeight || 1080;
+      c.getContext('2d', { alpha: false }).drawImage(video, 0, 0, c.width, c.height);
+      blob = await new Promise(r => c.toBlob(r, 'image/jpeg', FOTO_CALIDAD));
+    }
+    close();
+    if (blob) {
+      const small = await downscale(blob).catch(() => blob);
+      addFoto(key, { blob: small, url: URL.createObjectURL(small) });
+    } else toast('No se pudo capturar la foto. Intenta de nuevo.', 3000);
   };
 }
 function pickGallery(key, multi) {
@@ -646,12 +748,14 @@ function downscale(file) {
     const img = new Image();
     img.onload = () => {
       const w = img.naturalWidth, h = img.naturalHeight;
-      if (Math.max(w, h) <= FOTO_MAX_LADO && file.size < 2.5 * 1024 * 1024) { URL.revokeObjectURL(img.src); res(file); return; }
+      if (Math.max(w, h) <= FOTO_MAX_LADO && file.size < 3.5 * 1024 * 1024) { URL.revokeObjectURL(img.src); res(file); return; }
       const k = Math.min(1, FOTO_MAX_LADO / Math.max(w, h));
       const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const ctx = c.getContext('2d', { alpha: false });
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(img.src);
-      c.toBlob(b => b ? res(b) : rej(new Error('toBlob')), 'image/jpeg', .85);
+      c.toBlob(b => b ? res(b) : rej(new Error('toBlob')), 'image/jpeg', FOTO_CALIDAD);
     };
     img.onerror = rej; img.src = URL.createObjectURL(file);
   });
@@ -756,6 +860,7 @@ async function enviar() {
     if (e.key === '_gpsacc') return S.gps ? Math.round(S.gps.acc) : '';
     if (e.key === 'p20q') return S.subs.p20q || '';
     if (e.key === 'p27d') return S.subs.p27d || '';
+    if (e.key.charAt(0) === 'o') return S.otros[e.key] || '';
     return urlsDe(e.key);
   });
 
